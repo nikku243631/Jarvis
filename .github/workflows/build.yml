@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Setup Java 17
@@ -30,15 +30,84 @@ jobs:
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Extract Jarvis source ZIP
+        run: |
+          set -e
+
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Jarvis source ZIP not found."
+            exit 1
+          fi
+
+          echo "Found ZIP: $ZIP_FILE"
+
+          mkdir -p extracted
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "Extracted files:"
+          find extracted -maxdepth 4 -type f | head -100
+
+      - name: Find Android Gradle project
+        run: |
+          set -e
+
+          SETTINGS_FILE=$(find extracted -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            | head -n 1)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: Android Gradle project not found."
+            echo "Searching extracted files..."
+            find extracted -maxdepth 5 -type f
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
 
       - name: Build Jarvis
-        working-directory: Jarvis-v0.1
-        run: gradle assembleDebug --stacktrace
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --stacktrace
+          else
+            gradle assembleDebug --stacktrace
+          fi
+
+      - name: Prepare APK
+        run: |
+          set -e
+
+          APK=$(find "$PROJECT_DIR" -type f -path "*/build/outputs/apk/debug/*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          echo "APK found:"
+          echo "$APK"
+
+          mkdir -p apk-output
+          cp "$APK" apk-output/Jarvis-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Jarvis-v0.1-APK
-          path: Jarvis-v0.1/app/build/outputs/apk/debug/*.apk
+          name: Jarvis-APK
+          path: apk-output/Jarvis-debug.apk
