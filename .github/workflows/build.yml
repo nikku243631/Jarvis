@@ -1,4 +1,5 @@
-name: Build Jarvis APK
+
+          name: Build Jarvis APK
 
 on:
   workflow_dispatch:
@@ -12,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Java 17
@@ -26,88 +27,51 @@ jobs:
         with:
           packages: 'platform-tools'
 
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
-
-      - name: Extract Jarvis source ZIP
+      - name: Install required Android SDK packages
         run: |
           set -e
+          sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
-          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+      - name: Verify source archive
+        run: |
+          set -e
+          test -f Jarvis-v0.1-source-final-v2.zip
+          echo "Source archive found: Jarvis-v0.1-source-final-v2.zip"
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Jarvis source ZIP not found."
-            exit 1
-          fi
-
-          echo "Found ZIP: $ZIP_FILE"
-
+      - name: Extract source
+        run: |
+          set -e
+          rm -rf extracted
           mkdir -p extracted
-          unzip -q "$ZIP_FILE" -d extracted
+          unzip -q Jarvis-v0.1-source-final-v2.zip -d extracted
+          test -f extracted/Jarvis-v0.1/settings.gradle
+          test -f extracted/Jarvis-v0.1/app/build.gradle
+          test -f extracted/Jarvis-v0.1/app/src/main/AndroidManifest.xml
+          echo "Android project structure verified."
 
-          echo "Extracted files:"
-          find extracted -maxdepth 4 -type f | head -100
-
-      - name: Find Android Gradle project
-        run: |
-          set -e
-
-          SETTINGS_FILE=$(find extracted -type f \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-            | head -n 1)
-
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: Android Gradle project not found."
-            echo "Searching extracted files..."
-            find extracted -maxdepth 5 -type f
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-
-          echo "Android project found at:"
-          echo "$PROJECT_DIR"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Setup Gradle
+      - name: Setup Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
-      - name: Build Jarvis
+      - name: Build debug APK
+        working-directory: extracted/Jarvis-v0.1
         run: |
           set -e
+          gradle --version
+          gradle :app:assembleDebug --no-daemon --stacktrace
 
-          cd "$PROJECT_DIR"
-
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --stacktrace
-          else
-            gradle assembleDebug --stacktrace
-          fi
-
-      - name: Prepare APK
+      - name: Verify APK
         run: |
           set -e
-
-          APK=$(find "$PROJECT_DIR" -type f -path "*/build/outputs/apk/debug/*.apk" | head -n 1)
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-          echo "APK found:"
-          echo "$APK"
-
-          mkdir -p apk-output
-          cp "$APK" apk-output/Jarvis-debug.apk
+          APK="extracted/Jarvis-v0.1/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          echo "APK created: $APK"
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Jarvis-APK
-          path: apk-output/Jarvis-debug.apk
+          path: extracted/Jarvis-v0.1/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
